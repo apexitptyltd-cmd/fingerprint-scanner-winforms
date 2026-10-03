@@ -53,14 +53,14 @@ namespace ApexITTA
 
             public override string ToString()
             {
-                return $"{Hand} {Finger}";
+                return string.Format("{0} {1}", Hand, Finger);
             }
 
             public string GetDisplayName()
             {
                 string handDisplay = Hand == HandSide.Left ? "LEFT" : "RIGHT";
                 string fingerDisplay = Finger.ToString().ToUpper();
-                return $"{handDisplay} {fingerDisplay}";
+                return string.Format("{0} {1}", handDisplay, fingerDisplay);
             }
         }
 
@@ -291,8 +291,8 @@ namespace ApexITTA
                 }
 
                 textRes.Text = "========== 10-FINGER ENROLLMENT STARTED ==========\r\n" +
-                              "Sequence: LEFT HAND (Thumb→Index→Middle→Ring→Pinky)\r\n" +
-                              "Then: RIGHT HAND (Thumb→Index→Middle→Ring→Pinky)\r\n" +
+                              "Sequence: LEFT HAND (Thumb->Index->Middle->Ring->Pinky)\r\n" +
+                              "Then: RIGHT HAND (Thumb->Index->Middle->Ring->Pinky)\r\n" +
                               "Each finger: 3 scans for quality verification";
                 
                 // Start with first finger
@@ -330,10 +330,12 @@ namespace ApexITTA
                 int scanNum = ScansForCurrentFinger + 1;
                 
                 string fingerDisplay = currentStep.GetDisplayName();
-                string instruction = $"[FINGER {RegisterCount + 1}/10 - SCAN {scanNum}/{SCANS_PER_FINGER}]\r\n" +
-                                    $"Position: {fingerDisplay}\r\n" +
-                                    $"Overall Progress: {fingerProgressPercent}%\r\n\r\n" +
-                                    $"⚠ PLACE FINGER ON SCANNER NOW";
+                string instruction = string.Format(
+                    "[FINGER {0}/10 - SCAN {1}/{2}]\r\n" +
+                    "Position: {3}\r\n" +
+                    "Overall Progress: {4}%\r\n\r\n" +
+                    "⚠ PLACE FINGER ON SCANNER NOW",
+                    RegisterCount + 1, scanNum, SCANS_PER_FINGER, fingerDisplay, fingerProgressPercent);
 
                 textRes.Text = instruction;
             }
@@ -423,8 +425,10 @@ namespace ApexITTA
             ret = zkfp2.DBIdentify(mDBHandle, CapTmp, ref fid, ref score);
             if (zkfp.ZKFP_ERR_OK == ret)
             {
-                textRes.Text = $"ERROR: {currentStep.GetDisplayName()} fingerprint already matched to another record.\r\n" +
-                              "Try again with a different finger placement.";
+                textRes.Text = string.Format(
+                    "ERROR: {0} fingerprint already matched to another record.\r\n" +
+                    "Try again with a different finger placement.",
+                    currentStep.GetDisplayName());
                 ScansForCurrentFinger = 0;
                 return;
             }
@@ -439,9 +443,11 @@ namespace ApexITTA
                 int matchScore = zkfp2.DBMatch(mDBHandle, CapTmp, firstScan);
                 if (matchScore <= 0)
                 {
-                    textRes.Text = $"QUALITY CHECK FAILED: {currentStep.GetDisplayName()}\r\n" +
-                                  $"This scan doesn't match the first scan.\r\n" +
-                                  "Try again - ensure you're placing the same finger.";
+                    textRes.Text = string.Format(
+                        "QUALITY CHECK FAILED: {0}\r\n" +
+                        "This scan doesn't match the first scan.\r\n" +
+                        "Try again - ensure you're placing the same finger.",
+                        currentStep.GetDisplayName());
                     ScansForCurrentFinger = 0;
                     return;
                 }
@@ -458,8 +464,10 @@ namespace ApexITTA
                 currentStep.IsComplete = true;
                 string fingerName = currentStep.GetDisplayName();
                 
-                textRes.Text = $"✓ {fingerName} ENROLLED SUCCESSFULLY\r\n" +
-                              $"Moving to next finger...";
+                textRes.Text = string.Format(
+                    "✓ {0} ENROLLED SUCCESSFULLY\r\n" +
+                    "Moving to next finger...",
+                    fingerName);
 
                 // Move to next finger
                 RegisterCount++;
@@ -474,22 +482,29 @@ namespace ApexITTA
                     return;
                 }
 
-                // Brief delay before prompting for next finger
-                System.Threading.Tasks.Task.Delay(500).ContinueWith(_ =>
+                // Brief delay before prompting for next finger - using Timer for .NET 4.7.2 compatibility
+                Timer delayTimer = new Timer();
+                delayTimer.Interval = 500;
+                delayTimer.Tick += (s, e) =>
                 {
+                    delayTimer.Stop();
+                    delayTimer.Dispose();
                     if (IsRegister)
                     {
                         UpdateInstructionForCurrentFinger();
                     }
-                });
+                };
+                delayTimer.Start();
             }
             else
             {
                 // Need more scans for this finger
                 int remaining = SCANS_PER_FINGER - ScansForCurrentFinger;
                 string fingerName = currentStep.GetDisplayName();
-                textRes.Text = $"✓ Scan {ScansForCurrentFinger}/{SCANS_PER_FINGER} captured for {fingerName}\r\n" +
-                              $"Need {remaining} more scan(s) of this finger";
+                textRes.Text = string.Format(
+                    "✓ Scan {0}/{1} captured for {2}\r\n" +
+                    "Need {3} more scan(s) of this finger",
+                    ScansForCurrentFinger, SCANS_PER_FINGER, fingerName, remaining);
             }
         }
 
@@ -509,7 +524,7 @@ namespace ApexITTA
             for (int i = 0; i < 10; i++)
             {
                 FingerprintStep step = _fingerprintSequence[i];
-                string fingerKey = $"{step.Hand}_{step.Finger}";
+                string fingerKey = string.Format("{0}_{1}", step.Hand, step.Finger);
                 fingerTemplates[fingerKey] = step.Template;
             }
 
@@ -527,10 +542,12 @@ namespace ApexITTA
             // Save all 10 fingerprints to SQL database
             if (SaveMultiFingerToSql(userNameInput, fingerTemplates, finalImageBlob))
             {
-                textRes.Text = $"✓✓✓ 10-FINGER ENROLLMENT COMPLETE ✓✓✓\r\n\r\n" +
-                              $"Member: {userNameInput}\r\n" +
-                              $"All 10 fingerprints saved to database.\r\n" +
-                              $"Ready for identification.";
+                textRes.Text = string.Format(
+                    "✓✓✓ 10-FINGER ENROLLMENT COMPLETE ✓✓✓\r\n\r\n" +
+                    "Member: {0}\r\n" +
+                    "All 10 fingerprints saved to database.\r\n" +
+                    "Ready for identification.",
+                    userNameInput);
                 
                 // Reset for next enrollment
                 IsRegister = false;
@@ -561,26 +578,26 @@ namespace ApexITTA
                 
                 // Add all 10 finger templates
                 cmd.Parameters.Add("@LThumb", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Left_Thumb") ? fingerTemplates["Left_Thumb"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Left_Thumb") ? fingerTemplates["Left_Thumb"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@LIndex", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Left_Index") ? fingerTemplates["Left_Index"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Left_Index") ? fingerTemplates["Left_Index"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@LMiddle", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Left_Middle") ? fingerTemplates["Left_Middle"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Left_Middle") ? fingerTemplates["Left_Middle"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@LRing", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Left_Ring") ? fingerTemplates["Left_Ring"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Left_Ring") ? fingerTemplates["Left_Ring"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@LPinky", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Left_Pinky") ? fingerTemplates["Left_Pinky"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Left_Pinky") ? fingerTemplates["Left_Pinky"] : (object)DBNull.Value;
                 
                 cmd.Parameters.Add("@RThumb", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Right_Thumb") ? fingerTemplates["Right_Thumb"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Right_Thumb") ? fingerTemplates["Right_Thumb"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@RIndex", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Right_Index") ? fingerTemplates["Right_Index"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Right_Index") ? fingerTemplates["Right_Index"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@RMiddle", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Right_Middle") ? fingerTemplates["Right_Middle"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Right_Middle") ? fingerTemplates["Right_Middle"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@RRing", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Right_Ring") ? fingerTemplates["Right_Ring"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Right_Ring") ? fingerTemplates["Right_Ring"] : (object)DBNull.Value;
                 cmd.Parameters.Add("@RPinky", SqlDbType.VarBinary).Value = 
-                    fingerTemplates.ContainsKey("Right_Pinky") ? fingerTemplates["Right_Pinky"] : DBNull.Value;
+                    fingerTemplates.ContainsKey("Right_Pinky") ? fingerTemplates["Right_Pinky"] : (object)DBNull.Value;
                 
                 cmd.Parameters.Add("@Image", SqlDbType.VarBinary).Value = (object)lastCapturedImage ?? DBNull.Value;
                 
@@ -708,13 +725,15 @@ namespace ApexITTA
                 {
                     conn.Open();
                     cmd.ExecuteNonQuery();
-                    textRes.Text = $"✓ Match Confirmed: {name} (ID: {memberId})\r\nLogged at {DateTime.Now:HH:mm:ss}";
+                    textRes.Text = string.Format(
+                        "✓ Match Confirmed: {0} (ID: {1})\r\nLogged at {2:HH:mm:ss}",
+                        name, memberId, DateTime.Now);
 
                     LoadTodayAttendance();
                 }
                 catch (Exception ex)
                 {
-                    textRes.Text = $"Verified {name}, but attendance write transaction rolled back.";
+                    textRes.Text = string.Format("Verified {0}, but attendance write transaction rolled back.", name);
                 }
             }
         }
