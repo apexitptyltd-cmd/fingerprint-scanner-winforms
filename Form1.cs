@@ -39,17 +39,28 @@ namespace ApexITTA
             public HandSide Hand { get; set; }
             public FingerType Finger { get; set; }
             public int StepIndex { get; set; }
+            public byte[] Template { get; set; }
+            public bool IsComplete { get; set; }
 
             public FingerprintStep(int index, HandSide hand, FingerType finger)
             {
                 StepIndex = index;
                 Hand = hand;
                 Finger = finger;
+                Template = new byte[2048];
+                IsComplete = false;
             }
 
             public override string ToString()
             {
                 return $"{Hand} {Finger}";
+            }
+
+            public string GetDisplayName()
+            {
+                string handDisplay = Hand == HandSide.Left ? "LEFT" : "RIGHT";
+                string fingerDisplay = Finger.ToString().ToUpper();
+                return $"{handDisplay} {fingerDisplay}";
             }
         }
 
@@ -64,7 +75,9 @@ namespace ApexITTA
         private bool bIdentify = true;
         private byte[] FPBuffer;
         private int RegisterCount = 0;
-        private const int REGISTER_FINGER_COUNT = 10; // Changed to 10 fingers
+        private const int REGISTER_FINGER_COUNT = 10; // 10 fingers total
+        private const int SCANS_PER_FINGER = 3; // 3 scans per finger for quality verification
+        private int ScansForCurrentFinger = 0; // Track scans for current finger
 
         // Finger scan sequence - Left hand first (Thumb to Pinky), then Right hand (Thumb to Pinky)
         private readonly List<FingerprintStep> _fingerprintSequence = new List<FingerprintStep>
@@ -84,7 +97,7 @@ namespace ApexITTA
         };
 
         // Dynamic Native Memory Structural Holding Segments
-        private byte[][] RegTmps = new byte[10][]; // Increased to 10 fingers
+        private byte[][] RegTmps = new byte[10][]; // 10 fingers
         private byte[] RegTmp = new byte[2048];
         private byte[] CapTmp = new byte[2048];
         private int cbCapTmp = 2048;
@@ -200,6 +213,7 @@ namespace ApexITTA
             RegisterCount = 0;
             cbRegTmp = 0;
             iFid = 1;
+            ScansForCurrentFinger = 0;
             
             // Initialize 10 finger templates
             for (int i = 0; i < 10; i++)
@@ -222,7 +236,7 @@ namespace ApexITTA
             captureThread.IsBackground = true;
             captureThread.Start();
             bIsTimeToDie = false;
-            textRes.Text = "Open succ";
+            textRes.Text = "Device opened successfully. Ready for enrollment.";
         }
 
         private void CloseDevice()
@@ -242,6 +256,7 @@ namespace ApexITTA
         {
             CloseDevice();
             RegisterCount = 0;
+            ScansForCurrentFinger = 0;
             Thread.Sleep(1000);
             bnInit.Enabled = false;
             bnFree.Enabled = true;
@@ -256,10 +271,31 @@ namespace ApexITTA
         {
             if (!IsRegister)
             {
+                // Validate user name before starting enrollment
+                if (string.IsNullOrWhiteSpace(txtUserName.Text))
+                {
+                    MessageBox.Show("Please enter a member name before starting enrollment.", "Enrollment Error");
+                    return;
+                }
+
                 IsRegister = true;
                 RegisterCount = 0;
+                ScansForCurrentFinger = 0;
                 cbRegTmp = 0;
-                textRes.Text = "Starting 10-Finger Enrollment (Left Hand: Thumb → Pinky, Right Hand: Thumb → Pinky)";
+
+                // Clear enrollment data
+                for (int i = 0; i < 10; i++)
+                {
+                    _fingerprintSequence[i].IsComplete = false;
+                    _fingerprintSequence[i].Template = new byte[2048];
+                }
+
+                textRes.Text = "========== 10-FINGER ENROLLMENT STARTED ==========\r\n" +
+                              "Sequence: LEFT HAND (Thumb→Index→Middle→Ring→Pinky)\r\n" +
+                              "Then: RIGHT HAND (Thumb→Index→Middle→Ring→Pinky)\r\n" +
+                              "Each finger: 3 scans for quality verification";
+                
+                // Start with first finger
                 UpdateInstructionForCurrentFinger();
             }
         }
@@ -290,8 +326,20 @@ namespace ApexITTA
             if (RegisterCount < _fingerprintSequence.Count)
             {
                 FingerprintStep currentStep = _fingerprintSequence[RegisterCount];
-                int progressPercent = ((RegisterCount + 1) * 100) / REGISTER_FINGER_COUNT;
-                textRes.Text = $"[{RegisterCount + 1}/10] Scan {currentStep.Hand} {currentStep.Finger} - Progress: {progressPercent}%";
+                int fingerProgressPercent = ((RegisterCount + 1) * 100) / REGISTER_FINGER_COUNT;
+                int scanNum = ScansForCurrentFinger + 1;
+                
+                string fingerDisplay = currentStep.GetDisplayName();
+                string instruction = $"[FINGER {RegisterCount + 1}/10 - SCAN {scanNum}/{SCANS_PER_FINGER}]\r\n" +
+                                    $"Position: {fingerDisplay}\r\n" +
+                                    $"Overall Progress: {fingerProgressPercent}%\r\n\r\n" +
+                                    $"⚠ PLACE FINGER ON SCANNER NOW";
+
+                textRes.Text = instruction;
+            }
+            else
+            {
+                textRes.Text = "All 10 fingers enrolled. Processing...";
             }
         }
 
@@ -315,7 +363,7 @@ namespace ApexITTA
             {
                 case MESSAGE_CAPTURED_OK:
                     {
-                        // FIXED: Safe MemoryStream processing using explicit cloned bitmap creation to avoid crash
+                        // Safe MemoryStream processing using explicit cloned bitmap creation to avoid crash
                         MemoryStream ms = new MemoryStream();
                         BitmapFormat.GetBitmap(FPBuffer, mfpWidth, mfpHeight, ref ms);
                         if (ms.Length > 0)
@@ -359,47 +407,90 @@ namespace ApexITTA
         }
 
         /// <summary>
-        /// Processes enrollment for all 10 fingers sequentially
+        /// Processes enrollment for all 10 fingers sequentially with per-finger quality validation
         /// </summary>
         private void ProcessMultiFingerEnrollment()
         {
+            if (RegisterCount >= REGISTER_FINGER_COUNT)
+                return;
+
             int ret = zkfp.ZKFP_ERR_OK;
             int fid = 0, score = 0;
+
+            FingerprintStep currentStep = _fingerprintSequence[RegisterCount];
 
             // Check if fingerprint already exists in local DB
             ret = zkfp2.DBIdentify(mDBHandle, CapTmp, ref fid, ref score);
             if (zkfp.ZKFP_ERR_OK == ret)
             {
-                textRes.Text = "Error: Fingerprint already mapped locally to index: " + fid;
+                textRes.Text = $"ERROR: {currentStep.GetDisplayName()} fingerprint already matched to another record.\r\n" +
+                              "Try again with a different finger placement.";
+                ScansForCurrentFinger = 0;
                 return;
             }
 
-            // For the same finger position, verify consistency (3 scans minimum for quality)
-            if (RegisterCount > 0)
+            // For multi-scan verification: compare with first scan of current finger
+            if (ScansForCurrentFinger > 0)
             {
-                int matchScore = zkfp2.DBMatch(mDBHandle, CapTmp, RegTmps[RegisterCount - 1]);
+                // Create temporary storage for first scan
+                byte[] firstScan = new byte[2048];
+                Array.Copy(currentStep.Template, firstScan, 2048);
+
+                int matchScore = zkfp2.DBMatch(mDBHandle, CapTmp, firstScan);
                 if (matchScore <= 0)
                 {
-                    textRes.Text = "Validation Failed: Current scan doesn't match previous scan for this finger. Try again.";
+                    textRes.Text = $"QUALITY CHECK FAILED: {currentStep.GetDisplayName()}\r\n" +
+                                  $"This scan doesn't match the first scan.\r\n" +
+                                  "Try again - ensure you're placing the same finger.";
+                    ScansForCurrentFinger = 0;
                     return;
                 }
             }
 
-            // Store the captured fingerprint for current position
-            Array.Copy(CapTmp, RegTmps[RegisterCount], cbCapTmp);
-            RegisterCount++;
+            // Store this scan attempt
+            Array.Copy(CapTmp, currentStep.Template, cbCapTmp);
+            ScansForCurrentFinger++;
 
-            // Check if all 10 fingers are captured
-            if (RegisterCount >= REGISTER_FINGER_COUNT)
+            // Check if we have enough scans for this finger
+            if (ScansForCurrentFinger >= SCANS_PER_FINGER)
             {
-                // All fingers captured - merge and save
-                CompleteTenFingerEnrollment();
-                IsRegister = false;
-                return;
-            }
+                // Finger enrollment complete - move to next finger
+                currentStep.IsComplete = true;
+                string fingerName = currentStep.GetDisplayName();
+                
+                textRes.Text = $"✓ {fingerName} ENROLLED SUCCESSFULLY\r\n" +
+                              $"Moving to next finger...";
 
-            // Update UI for next finger
-            UpdateInstructionForCurrentFinger();
+                // Move to next finger
+                RegisterCount++;
+                ScansForCurrentFinger = 0;
+
+                // Check if all fingers are done
+                if (RegisterCount >= REGISTER_FINGER_COUNT)
+                {
+                    // All fingers captured
+                    CompleteTenFingerEnrollment();
+                    IsRegister = false;
+                    return;
+                }
+
+                // Brief delay before prompting for next finger
+                System.Threading.Tasks.Task.Delay(500).ContinueWith(_ =>
+                {
+                    if (IsRegister)
+                    {
+                        UpdateInstructionForCurrentFinger();
+                    }
+                });
+            }
+            else
+            {
+                // Need more scans for this finger
+                int remaining = SCANS_PER_FINGER - ScansForCurrentFinger;
+                string fingerName = currentStep.GetDisplayName();
+                textRes.Text = $"✓ Scan {ScansForCurrentFinger}/{SCANS_PER_FINGER} captured for {fingerName}\r\n" +
+                              $"Need {remaining} more scan(s) of this finger";
+            }
         }
 
         /// <summary>
@@ -419,9 +510,7 @@ namespace ApexITTA
             {
                 FingerprintStep step = _fingerprintSequence[i];
                 string fingerKey = $"{step.Hand}_{step.Finger}";
-                byte[] fingerTemplate = new byte[2048];
-                Array.Copy(RegTmps[i], fingerTemplate, 2048);
-                fingerTemplates[fingerKey] = fingerTemplate;
+                fingerTemplates[fingerKey] = step.Template;
             }
 
             // Capture current fingerprint image
@@ -438,11 +527,19 @@ namespace ApexITTA
             // Save all 10 fingerprints to SQL database
             if (SaveMultiFingerToSql(userNameInput, fingerTemplates, finalImageBlob))
             {
-                textRes.Text = $"10-Finger Enrollment Complete: Saved {userNameInput} to SQL Server!";
+                textRes.Text = $"✓✓✓ 10-FINGER ENROLLMENT COMPLETE ✓✓✓\r\n\r\n" +
+                              $"Member: {userNameInput}\r\n" +
+                              $"All 10 fingerprints saved to database.\r\n" +
+                              $"Ready for identification.";
+                
+                // Reset for next enrollment
+                IsRegister = false;
+                ScansForCurrentFinger = 0;
             }
             else
             {
-                textRes.Text = "Error: 10-finger templates captured, but SQL server upload failed.";
+                textRes.Text = "ERROR: 10-finger templates captured, but SQL server upload failed.\r\n" +
+                              "Please check your database connection.";
             }
         }
 
@@ -611,7 +708,7 @@ namespace ApexITTA
                 {
                     conn.Open();
                     cmd.ExecuteNonQuery();
-                    textRes.Text = $"Match Confirmed: {name} (ID: {memberId}). Logged at {DateTime.Now:HH:mm:ss}";
+                    textRes.Text = $"✓ Match Confirmed: {name} (ID: {memberId})\r\nLogged at {DateTime.Now:HH:mm:ss}";
 
                     LoadTodayAttendance();
                 }
