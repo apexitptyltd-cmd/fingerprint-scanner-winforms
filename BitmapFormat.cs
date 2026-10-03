@@ -44,6 +44,7 @@ namespace Sample
 
         /// <summary>
         /// Converts structural context metadata objects directly into native memory byte payloads.
+        /// Compatible with .NET Framework 4.7.2
         /// </summary>
         public static byte[] StructToBytes(object structObj, int size)
         {
@@ -63,6 +64,7 @@ namespace Sample
 
         /// <summary>
         /// Flips the raw buffer vertically to correct inverted imaging artifacts introduced by fingerprint scanner drivers.
+        /// Compatible with .NET Framework 4.7.2
         /// </summary>
         public static void RotatePic(byte[] buffer, int width, int height, ref byte[] resBuf)
         {
@@ -82,6 +84,7 @@ namespace Sample
         /// Generates a perfectly formatted, 8-bit uncompressed grayscale BMP structure inside a MemoryStream.
         /// Fixes row padding alignment requirements (4-byte alignment boundaries) and prevents stream pointer layout crashes.
         /// Compatible with 10-finger enrollment sequence from both hands.
+        /// Compatible with .NET Framework 4.7.2
         /// </summary>
         public static void GetBitmap(byte[] buffer, int nWidth, int nHeight, ref MemoryStream ms)
         {
